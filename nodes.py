@@ -1,3 +1,4 @@
+import json
 class CustomSlider:
     @classmethod
     def INPUT_TYPES(s):
@@ -102,3 +103,215 @@ class PythonExecutorNode:
 
         # Возвращаем результаты, которые скрипт присвоил переменным out1 и out2
         return (local_vars.get("out1"), local_vars.get("out2"))
+
+
+def safe_dict_copy(d):
+    if isinstance(d, dict):
+        return {k: safe_dict_copy(v) for k, v in d.items()}
+    return d
+
+
+class UniversalJSONNode_vvv:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "key_path": ("STRING", {"default": "settings.value"}),
+                "default_on_read": ("STRING", {"default": ""}), 
+                "value": ("STRING", {"default": "", "multiline": True}),
+            },
+            "optional": {
+                "json (any)": (ANY, ),
+                "value (any)": (ANY, ),
+            }
+        }
+
+    RETURN_TYPES = (ANY, "STRING", "BOOLEAN", ANY, "STRING", "INT", "FLOAT", "BOOLEAN")
+    RETURN_NAMES = ("json (any)", "json (str)", "found", "value (any)", "value (str)", "value (int)", "value (float)", "value (bool)")
+    FUNCTION = "execute"
+    CATEGORY = "vvvNodes/JSON"
+    OUTPUT_NODE = True 
+
+    def execute(self, key_path, value, default_on_read, **kwargs):
+        errors =[]
+        json_input = kwargs.get("json (any)", None)
+        data = {}
+
+        if json_input is not None:
+            if isinstance(json_input, str):
+                if json_input.strip():
+                    try:
+                        data = json.loads(json_input)
+                    except Exception as e:
+                        errors.append(f"❌ Input Parse Error: {e}")
+            elif isinstance(json_input, dict):
+                data = safe_dict_copy(json_input)
+            else:
+                try:
+                    data = dict(json_input)
+                except (TypeError, ValueError):
+                    if hasattr(json_input, '__dict__'):
+                        data = safe_dict_copy(json_input.__dict__)
+                    else:
+                        errors.append("❌ Invalid json input type.")
+
+        keys = key_path.split('.')
+        
+        curr_check = data
+        found_in_input = True
+        if not data:
+            found_in_input = False
+        else:
+            for k in keys:
+                if isinstance(curr_check, dict) and k in curr_check:
+                    curr_check = curr_check[k]
+                else:
+                    found_in_input = False
+                    break
+        
+        write_mode = False
+        val_to_write = None
+
+        if "value (any)" in kwargs:
+            write_mode = True
+            val_to_write = kwargs["value (any)"]
+        elif value.strip() != "":
+            write_mode = True
+            try:
+                val_to_write = json.loads(value)
+            except:
+                val_to_write = value
+
+        if write_mode:
+            curr = data
+            for k in keys[:-1]:
+                if k not in curr or not isinstance(curr[k], dict):
+                    curr[k] = {}
+                curr = curr[k]
+            curr[keys[-1]] = val_to_write 
+
+        curr = data
+        found_now = True
+        for k in keys:
+            if isinstance(curr, dict) and k in curr:
+                curr = curr[k]
+            else:
+                found_now = False
+                break
+        
+        out_val = curr if found_now else default_on_read
+
+        preview_text = ""
+        if errors:
+            preview_text = "\n".join(errors)
+        else:
+            if isinstance(out_val, (dict, list)):
+                try:
+                    preview_text = json.dumps(out_val, indent=2, default=str)
+                except:
+                    preview_text = str(out_val)
+            else:
+                preview_text = str(out_val)
+
+        out_json_any = data
+        out_json_str = json.dumps(data, default=str, indent=2)
+        out_str = str(out_val) if out_val is not None else ""
+        
+        out_float = 0.0
+        try: out_float = float(out_val)
+        except (ValueError, TypeError): pass
+            
+        out_int = 0
+        try: out_int = int(out_val)
+        except (ValueError, TypeError):
+            try: out_int = int(float(out_val))
+            except (ValueError, TypeError): pass
+                
+        out_bool = False
+        if isinstance(out_val, bool):
+            out_bool = out_val
+        elif isinstance(out_val, str):
+            out_bool = out_val.strip().lower() in ("true", "1", "yes", "on", "t", "y")
+        else:
+            out_bool = bool(out_val)
+
+        return {
+            "ui": {"text": [preview_text]}, 
+            "result": (out_json_any, out_json_str, found_in_input, out_val, out_str, out_int, out_float, out_bool)
+        }
+
+
+class SimpleJSONNode_vvv:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "key_path": ("STRING", {"default": "settings.value"}),
+            },
+            "optional": {
+                "json (any)": (ANY, ),
+                "value (any)": (ANY, ),
+            }
+        }
+
+    RETURN_TYPES = (ANY, ANY, "BOOLEAN")
+    RETURN_NAMES = ("json (any)", "value (any)", "found")
+    FUNCTION = "execute"
+    CATEGORY = "vvvNodes/JSON"
+
+    def execute(self, key_path, **kwargs):
+        json_input = kwargs.get("json (any)", None)
+        data = {}
+
+        if json_input is not None:
+            if isinstance(json_input, str):
+                if json_input.strip():
+                    try:
+                        data = json.loads(json_input)
+                    except:
+                        pass
+            elif isinstance(json_input, dict):
+                data = safe_dict_copy(json_input)
+            else:
+                try:
+                    data = dict(json_input)
+                except:
+                    if hasattr(json_input, '__dict__'):
+                        data = safe_dict_copy(json_input.__dict__)
+
+        keys = key_path.split('.')
+        
+        curr_check = data
+        found_in_input = True
+        if not data:
+            found_in_input = False
+        else:
+            for k in keys:
+                if isinstance(curr_check, dict) and k in curr_check:
+                    curr_check = curr_check[k]
+                else:
+                    found_in_input = False
+                    break
+        
+        if "value (any)" in kwargs:
+            val_to_write = kwargs["value (any)"]
+            curr = data
+            for k in keys[:-1]:
+                if k not in curr or not isinstance(curr[k], dict):
+                    curr[k] = {}
+                curr = curr[k]
+            curr[keys[-1]] = val_to_write 
+
+        curr = data
+        found_now = True
+        for k in keys:
+            if isinstance(curr, dict) and k in curr:
+                curr = curr[k]
+            else:
+                found_now = False
+                break
+        
+        out_val = curr if found_now else None
+
+        return (data, out_val, found_in_input)
+
