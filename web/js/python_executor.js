@@ -60,36 +60,48 @@ function dynamicConnections(node, prefix, type) {
     let slots = type === 1 ? node.inputs : node.outputs;
     if (!slots) return;
 
-    // Determine the required number of slots: count how many are connected and add 1, min 2, max 16.
+    // Find all slots with the prefix
     let customSlots = slots.filter(s => s.name.startsWith(prefix));
-    let connectedCount = customSlots.filter(s => s.link !== null && s.link !== undefined).length;
-    let requiredSlotsCount = Math.max(2, connectedCount + 1);
+    
+    // Find the index of the LAST connected slot among custom slots
+    let lastConnectedSlotIndex = -1;
+    for (let i = 0; i < customSlots.length; i++) {
+        if (customSlots[i].link !== null && customSlots[i].link !== undefined) {
+            lastConnectedSlotIndex = i;
+        }
+    }
+
+    // Required count: at least 2, and exactly one empty slot after the last connected one.
+    let requiredSlotsCount = Math.max(2, lastConnectedSlotIndex + 2);
     requiredSlotsCount = Math.min(requiredSlotsCount, maxSlots);
 
     // Trim empty slots from the end until we reach the required count
     while (true) {
-        let currentCustomCount = (type === 1 ? node.inputs : node.outputs).filter(s => s.name.startsWith(prefix)).length;
-        if (currentCustomCount <= requiredSlotsCount) break;
+        let currentCustomSlots = (type === 1 ? node.inputs : node.outputs).filter(s => s.name.startsWith(prefix));
+        if (currentCustomSlots.length <= requiredSlotsCount) break;
 
-        // Find the LAST custom slot
-        let lastCustomIndex = -1;
-        let lastCustomSlot = null;
-        let currentSlots = type === 1 ? node.inputs : node.outputs;
-        for (let i = currentSlots.length - 1; i >= 0; i--) {
-            if (currentSlots[i].name.startsWith(prefix)) {
-                lastCustomIndex = i;
-                lastCustomSlot = currentSlots[i];
+        // Find the absolute LAST slot index in the node's full list that matches the prefix
+        let lastSlotIndexInNode = -1;
+        let allSlots = type === 1 ? node.inputs : node.outputs;
+        for (let i = allSlots.length - 1; i >= 0; i--) {
+            if (allSlots[i].name.startsWith(prefix)) {
+                lastSlotIndexInNode = i;
                 break;
             }
         }
 
-        if (lastCustomIndex !== -1 && (lastCustomSlot.link === null || lastCustomSlot.link === undefined)) {
-            // The last custom slot is empty and we have more than required slots, so remove it.
-            if (type === 1) node.removeInput(lastCustomIndex);
-            else node.removeOutput(lastCustomIndex);
+        if (lastSlotIndexInNode !== -1) {
+            let lastSlot = allSlots[lastSlotIndexInNode];
+            // Only remove if it's the very last custom slot and it's empty
+            if (lastSlot.link === null || lastSlot.link === undefined) {
+                if (type === 1) node.removeInput(lastSlotIndexInNode);
+                else node.removeOutput(lastSlotIndexInNode);
+            } else {
+                // If the last slot is connected, we can't trim further
+                break; 
+            }
         } else {
-            // The last custom slot is connected, so we can't remove from the end anymore!
-            break; 
+            break;
         }
     }
 
@@ -98,7 +110,8 @@ function dynamicConnections(node, prefix, type) {
     let currentSlotsCount = customSlots.length;
     
     while (currentSlotsCount < requiredSlotsCount) {
-        // Find the next available index
+        // Find the next available index based on current naming pattern in1, in2...
+        // We find the highest number currently in use and add 1
         let nextIndex = 1;
         for (const s of customSlots) {
             const match = s.name.match(new RegExp(`^${prefix}(\\d+)$`));
