@@ -155,13 +155,13 @@ class UniversalJSONNode_vvv:
                     else:
                         errors.append("❌ Invalid json input type.")
 
-        keys = key_path.split('.')
+        keys = [k for k in key_path.split('.') if k]
         
         curr_check = data
         found_in_input = True
         if not data:
             found_in_input = False
-        else:
+        elif keys:
             for k in keys:
                 if isinstance(curr_check, dict) and k in curr_check:
                     curr_check = curr_check[k]
@@ -186,7 +186,7 @@ class UniversalJSONNode_vvv:
             except:
                 val_to_write = value
 
-        if write_mode:
+        if write_mode and keys:
             curr = data
             for k in keys[:-1]:
                 if k not in curr or not isinstance(curr[k], dict):
@@ -196,12 +196,13 @@ class UniversalJSONNode_vvv:
 
         curr = data
         found_now = True
-        for k in keys:
-            if isinstance(curr, dict) and k in curr:
-                curr = curr[k]
-            else:
-                found_now = False
-                break
+        if keys:
+            for k in keys:
+                if isinstance(curr, dict) and k in curr:
+                    curr = curr[k]
+                else:
+                    found_now = False
+                    break
         
         # Determine source prefix for preview
         source_prefix = "found: " if found_now else "default: "
