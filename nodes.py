@@ -48,37 +48,56 @@ class PythonExecutorNode:
     
     @classmethod
     def INPUT_TYPES(cls):
+        optional_inputs = {f"in{i}": (ANY, ) for i in range(1, 17)}
         return {
             "required": {
                 # Текстовое поле для ввода кода
                 "python_code": ("STRING", {
                     "multiline": True,
-                    "default": "# Доступные функции: torch, math, np\n# Входы: in1, in2, in3\n# Назначьте результат переменным out1 и/или out2\n\nout1 = in1"
+                    "default": "# Доступные функции: torch, math, np\n# Входы: in1..in16\n# Назначьте результат переменным out1..out16\n\nout1 = in1"
                 }),
             },
-            "optional": {
-                # Опциональные входы (можно подать картинки, числа, латенты)
-                "in1": (ANY, ),
-                "in2": (ANY, ),
-                "in3": (ANY, ),
+            "optional": optional_inputs,
+            "hidden": {
+                "extra_pnginfo": "EXTRA_PNGINFO",
+                "unique_id": "UNIQUE_ID"
             }
         }
 
     # Возвращаем тоже любые типы (можно сделать несколько выходов)
-    RETURN_TYPES = (ANY, ANY)
-    RETURN_NAMES = ("out1", "out2")
+    RETURN_TYPES = tuple([ANY] * 16)
+    RETURN_NAMES = tuple([f"out{i}" for i in range(1, 17)])
     FUNCTION = "execute_code"
     CATEGORY = "vvvNodes/Scripting"
 
-    def execute_code(self, python_code, in1=None, in2=None, in3=None):
+    def execute_code(self, python_code, extra_pnginfo=None, unique_id=None, **kwargs):
+        input_labels = {}
+        output_labels = {}
+        if extra_pnginfo and "workflow" in extra_pnginfo and unique_id:
+            for node in extra_pnginfo["workflow"].get("nodes", []):
+                if str(node.get("id")) == str(unique_id):
+                    for inp in node.get("inputs", []):
+                        if inp.get("label"):
+                            input_labels[inp["name"]] = inp["label"]
+                    for out in node.get("outputs", []):
+                        if out.get("label"):
+                            output_labels[out["name"]] = out["label"]
+                    break
+
         # Словарь локальных переменных, которые будут доступны вашему коду
-        local_vars = {
-            "in1": in1,
-            "in2": in2,
-            "in3": in3,
-            "out1": None,
-            "out2": None,
-        }
+        local_vars = {}
+        for i in range(1, 17):
+            orig_in = f"in{i}"
+            orig_out = f"out{i}"
+            
+            val = kwargs.get(orig_in, None)
+            local_vars[orig_in] = val
+            if orig_in in input_labels:
+                local_vars[input_labels[orig_in]] = val
+                
+            local_vars[orig_out] = None
+            if orig_out in output_labels:
+                local_vars[output_labels[orig_out]] = None
         
         # Импортируем популярные библиотеки, чтобы они были доступны внутри виджета по умолчанию
         import torch
@@ -101,8 +120,18 @@ class PythonExecutorNode:
             # Если в введенном коде ошибка - прерываем генерацию и выводим лог
             raise RuntimeError(f"Ошибка выполнения Python кода в ноде: {e}")
 
-        # Возвращаем результаты, которые скрипт присвоил переменным out1 и out2
-        return (local_vars.get("out1"), local_vars.get("out2"))
+        # Возвращаем результаты, которые скрипт присвоил переменным out1..out16
+        res = []
+        for i in range(1, 17):
+            orig_out = f"out{i}"
+            out_val = local_vars.get(orig_out)
+            if orig_out in output_labels:
+                custom_val = local_vars.get(output_labels[orig_out])
+                if custom_val is not None:
+                    out_val = custom_val
+            res.append(out_val)
+            
+        return tuple(res)
 
 
 def safe_dict_copy(d):
