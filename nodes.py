@@ -121,20 +121,20 @@ class UniversalJSONNode_vvv:
                 "value": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
-                "json (any)": (ANY, ),
+                "pipe (any)": (ANY, ),
                 "value (any)": (ANY, ),
             }
         }
 
     RETURN_TYPES = (ANY, "STRING", "BOOLEAN", ANY, "STRING", "INT", "FLOAT", "BOOLEAN")
-    RETURN_NAMES = ("json (any)", "json (str)", "found", "value (any)", "value (str)", "value (int)", "value (float)", "value (bool)")
+    RETURN_NAMES = ("pipe (any)", "pipe (json)", "found", "value (any)", "value (str)", "value (int)", "value (float)", "value (bool)")
     FUNCTION = "execute"
     CATEGORY = "vvvNodes/JSON"
     OUTPUT_NODE = True 
 
     def execute(self, key_path, value, default_on_read, **kwargs):
         errors =[]
-        json_input = kwargs.get("json (any)", None)
+        json_input = kwargs.get("pipe (any)", None)
         data = {}
 
         if json_input is not None:
@@ -178,7 +178,11 @@ class UniversalJSONNode_vvv:
         elif value.strip() != "":
             write_mode = True
             try:
-                val_to_write = json.loads(value)
+                # Interpret "" as an empty string
+                if value.strip() == '""':
+                    val_to_write = ""
+                else:
+                    val_to_write = json.loads(value)
             except:
                 val_to_write = value
 
@@ -199,19 +203,33 @@ class UniversalJSONNode_vvv:
                 found_now = False
                 break
         
-        out_val = curr if found_now else default_on_read
+        # Determine source prefix for preview
+        source_prefix = "found: " if found_now else "default: "
+        if write_mode and found_now:
+            source_prefix = "value: "
 
-        preview_text = ""
+        # Normalize default_on_read if it is exactly ""
+        effective_default = "" if default_on_read == '""' else default_on_read
+
+        # Strict check: if not found and both fallback options are empty
+        if not found_now and default_on_read == "" and value == "":
+            raise ValueError(f"❌ Key path '{key_path}' not found and no fallback value provided in 'default_on_read' or 'value'.")
+
+        out_val = curr if found_now else effective_default
+
+        preview_data = ""
         if errors:
-            preview_text = "\n".join(errors)
+            preview_data = "\n".join(errors)
         else:
             if isinstance(out_val, (dict, list)):
                 try:
-                    preview_text = json.dumps(out_val, indent=2, default=str)
+                    preview_data = json.dumps(out_val, indent=2, default=str)
                 except:
-                    preview_text = str(out_val)
+                    preview_data = str(out_val)
             else:
-                preview_text = str(out_val)
+                preview_data = str(out_val)
+        
+        preview_text = f"{source_prefix}{preview_data}"
 
         out_json_any = data
         out_json_str = json.dumps(data, default=str, indent=2)
@@ -242,6 +260,9 @@ class UniversalJSONNode_vvv:
 
 
 class SimpleJSONNode_vvv:
+    """
+    Lenient version with 'found' output. Does not stop on error.
+    """
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -249,18 +270,18 @@ class SimpleJSONNode_vvv:
                 "key_path": ("STRING", {"default": "settings.value"}),
             },
             "optional": {
-                "json (any)": (ANY, ),
+                "pipe (any)": (ANY, ),
                 "value (any)": (ANY, ),
             }
         }
 
     RETURN_TYPES = (ANY, ANY, "BOOLEAN")
-    RETURN_NAMES = ("json (any)", "value (any)", "found")
+    RETURN_NAMES = ("pipe (any)", "value (any)", "found")
     FUNCTION = "execute"
     CATEGORY = "vvvNodes/JSON"
 
     def execute(self, key_path, **kwargs):
-        json_input = kwargs.get("json (any)", None)
+        json_input = kwargs.get("pipe (any)", None)
         data = {}
 
         if json_input is not None:
@@ -314,4 +335,76 @@ class SimpleJSONNode_vvv:
         out_val = curr if found_now else None
 
         return (data, out_val, found_in_input)
+
+
+class StrictJSONNode_vvv:
+    """
+    Strict version without 'found' output. Stops on missing key.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "key_path": ("STRING", {"default": "settings.value"}),
+            },
+            "optional": {
+                "pipe (any)": (ANY, ),
+                "value (any)": (ANY, ),
+            }
+        }
+
+    RETURN_TYPES = (ANY, ANY)
+    RETURN_NAMES = ("pipe (any)", "value (any)")
+    FUNCTION = "execute"
+    CATEGORY = "vvvNodes/JSON"
+
+    def execute(self, key_path, **kwargs):
+        json_input = kwargs.get("pipe (any)", None)
+        data = {}
+
+        if json_input is not None:
+            if isinstance(json_input, str):
+                if json_input.strip():
+                    try:
+                        data = json.loads(json_input)
+                    except:
+                        pass
+            elif isinstance(json_input, dict):
+                data = safe_dict_copy(json_input)
+            else:
+                try:
+                    data = dict(json_input)
+                except:
+                    if hasattr(json_input, '__dict__'):
+                        data = safe_dict_copy(json_input.__dict__)
+
+        keys = key_path.split('.')
+        
+        # Check if exists (strict mode)
+        curr = data
+        found = True
+        if not data and "value (any)" not in kwargs:
+            found = False
+        else:
+            for k in keys:
+                if isinstance(curr, dict) and k in curr:
+                    curr = curr[k]
+                else:
+                    found = False
+                    break
+        
+        if "value (any)" in kwargs:
+            val_to_write = kwargs["value (any)"]
+            curr = data
+            for k in keys[:-1]:
+                if k not in curr or not isinstance(curr[k], dict):
+                    curr[k] = {}
+                curr = curr[k]
+            curr[keys[-1]] = val_to_write 
+            found = True
+
+        if not found:
+            raise ValueError(f"❌ Key path '{key_path}' not found in JSON.")
+
+        return (data, curr)
 
